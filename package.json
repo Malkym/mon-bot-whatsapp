@@ -5,6 +5,7 @@
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
+    "install": "npm rebuild",
     "dev": "NODE_ENV=development node bot.js",
     "test": "node test.js",
     "stop": "./control.sh stop",
