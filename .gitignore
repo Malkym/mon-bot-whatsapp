@@ -1,0 +1,43 @@
+# Node modules
+node_modules/
+package-lock.json
+
+# Configuration sensible
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+nohup.out
+
+# Database
+*.db
+*.db-journal
+
+# WhatsApp session
+wwebjs_auth/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Backup
+backup-*/
+*.backup
+
+# Temporaire
+temp/
+tmp/
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store

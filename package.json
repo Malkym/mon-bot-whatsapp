@@ -1,0 +1,38 @@
+{
+  "name": "whatsapp-groq-bot",
+  "version": "2.0.0",
+  "description": "Assistant IA personnel sur WhatsApp utilisant Groq API",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "NODE_ENV=development node bot.js",
+    "test": "node test.js",
+    "stop": "./control.sh stop",
+    "restart": "./control.sh restart",
+    "status": "./control.sh status",
+    "logs": "./control.sh logs",
+    "clean": "./clean.sh"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "groq",
+    "ia",
+    "llama",
+    "chatbot"
+  ],
+  "author": "Malkym",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.17.0",
+    "dotenv": "^17.4.2",
+    "qrcode-terminal": "^0.12.0",
+    "sqlite3": "^6.0.1",
+    "whatsapp-web.js": "^1.34.7"
+  },
+  "devDependencies": {}
+}
