@@ -3,7 +3,7 @@ services:
     name: mon-assistant-whatsapp
     runtime: node
     buildCommand: npm install
-    startCommand: node bot-avance.js
+    startCommand: node bot.js
     envVars:
       - key: GROQ_API_KEY
         sync: false

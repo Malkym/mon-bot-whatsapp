@@ -96,8 +96,10 @@ function cleanup() {
 }
 
 // Nettoie les buckets toutes les heures sans bloquer l'arret des tests/scripts.
-const cleanupTimer = setInterval(cleanup, 3600000);
-if (cleanupTimer.unref) cleanupTimer.unref();
+if (config.rateLimit.enabled) {
+    const cleanupTimer = setInterval(cleanup, 3600000);
+    if (cleanupTimer.unref) cleanupTimer.unref();
+}
 
 module.exports = {
     checkLimit,

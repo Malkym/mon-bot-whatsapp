@@ -20,7 +20,7 @@ function sanitizeMessage(message) {
     return message
         .slice(0, 4096) // Limiter la longueur
         .trim()
-        .replace(/<script[^>]*>.*?<\/script>/gi, '') // Supprimer les scripts
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '') // Supprimer les scripts
         .replace(/<[^>]*>/g, '') // Supprimer toutes les balises HTML
         .replace(/[<>]/g, '') // Éviter HTML/XML injections restantes
         .replace(/\n{3,}/g, '\n\n'); // Limiter les sauts de ligne
@@ -236,39 +236,24 @@ function needsWebSearch(message) {
     if (!config.webSearch.enabled) return false;
 
     return [
-        'recherche',
-        'cherche sur internet',
-        'sur google',
-        'google',
-        'internet',
-        'actualite',
-        'actualité',
-        'news',
-        'aujourd hui',
-        'aujourd’hui',
-        'maintenant',
-        'en ce moment',
-        'prix',
-        'meteo',
-        'météo',
-        'score',
-        'horaire',
-        'dernier',
-        'derniere',
-        'recente',
-        'recent',
-        'president',
-        'président',
-        'ministre',
-        'ceo',
-        'directeur',
-        'version',
-        'disponible',
-        'qui est',
-        'c est quoi',
-        'c’est quoi',
-        'ou trouver',
-        'où trouver',
+        'recherche', 'cherche', 'google', 'internet', 'web',
+        'actualite', 'actualité', 'news', 'nouveau', 'nouvelle',
+        'aujourd hui', 'aujourd’hui', 'maintenant', 'en ce moment',
+        'prix', 'cout', 'combien', 'tarif',
+        'meteo', 'météo', 'temperature', 'pluie',
+        'score', 'match', 'resultat', 'classement',
+        'horaire', 'heure', 'ouverture', 'fermeture',
+        'dernier', 'derniere', 'recente', 'recent', 'dernieres', 'dernières',
+        'president', 'président', 'ministre', 'gouvernement', 'election', 'election',
+        'ceo', 'directeur', 'fondateur', 'createur', 'inventeur',
+        'version', 'sortie', 'lancement', 'disponible',
+        'qui est', 'c est quoi', 'c’est quoi', 'qu est ce que', 'qu\'est-ce que',
+        'ou trouver', 'où trouver', 'comment', 'pourquoi',
+        'definition', 'signification', 'difference', 'différence',
+        'histoire', 'origine', 'date',
+        'population', 'capitale', 'superficie',
+        'meilleur', 'meilleure', 'top', 'comparaison',
+        'conseil', 'astuce', 'tutoriel', 'guide',
     ].some(keyword => normalized.includes(keyword.normalize('NFD').replace(/[\u0300-\u036f]/g, '')));
 }
 
@@ -334,52 +319,57 @@ async function searchWithDuckDuckGo(query) {
     return results.slice(0, config.webSearch.maxResults);
 }
 
-function decodeHtmlEntity(entity) {
-    const named = {
-        amp: '&',
-        lt: '<',
-        gt: '>',
-        quot: '"',
-        apos: "'",
-        '#39': "'",
+async function searchWikipedia(query) {
+    const params = {
+        action: 'query',
+        list: 'search',
+        srsearch: query,
+        format: 'json',
+        srlimit: config.webSearch.maxResults,
+        srprop: 'snippet|titlesnippet',
+        uselang: 'fr',
     };
-    if (named[entity]) return named[entity];
-    if (entity.startsWith('#x')) return String.fromCharCode(parseInt(entity.slice(2), 16));
-    if (entity.startsWith('#')) return String.fromCharCode(parseInt(entity.slice(1), 10));
-    return `&${entity};`;
-}
 
-function stripHtml(value) {
-    return String(value || '')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&([^;]+);/g, (_, entity) => decodeHtmlEntity(entity))
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-async function searchWithDuckDuckGoHtml(query) {
-    const response = await axios.get('https://html.duckduckgo.com/html/', {
-        params: { q: query },
-        headers: {
-            'User-Agent': `${config.bot.name}/2.0 (+local WhatsApp assistant)`,
-        },
-        timeout: 12000,
+    const response = await axios.get('https://fr.wikipedia.org/w/api.php', {
+        params,
+        family: 4,
+        headers: { 'User-Agent': `${config.bot.name}/${config.bot.version} (WhatsApp bot)` },
+        timeout: 10000,
     });
 
-    const html = String(response.data || '');
     const results = [];
-    const resultRegex = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>[\s\S]*?<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)<\/a>/gi;
-    let match;
-
-    while ((match = resultRegex.exec(html)) && results.length < config.webSearch.maxResults) {
+    const searchResults = response.data?.query?.search || [];
+    for (const result of searchResults) {
+        if (results.length >= config.webSearch.maxResults) break;
         results.push({
-            title: stripHtml(match[2]),
-            snippet: stripHtml(match[3]),
-            url: stripHtml(match[1]),
+            title: result.title,
+            snippet: result.snippet
+                .replace(/<[^>]+>/g, '')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim(),
+            url: `https://fr.wikipedia.org/wiki/${encodeURIComponent(result.title.replace(/ /g, '_'))}`,
         });
     }
-
     return results;
+}
+
+async function searchTavily(query) {
+    const response = await axios.post('https://api.tavily.com/search', {
+        api_key: config.webSearch.tavilyApiKey,
+        query,
+        search_depth: 'basic',
+        max_results: config.webSearch.maxResults,
+        include_answer: false,
+    }, {
+        timeout: 10000,
+    });
+
+    return (response.data?.results || []).slice(0, config.webSearch.maxResults).map(result => ({
+        title: result.title,
+        snippet: result.content,
+        url: result.url,
+    }));
 }
 
 async function performWebSearch(query) {
@@ -392,18 +382,28 @@ async function performWebSearch(query) {
     }
 
     try {
-        const useBrave = config.webSearch.provider === 'brave' && config.webSearch.braveApiKey;
-        let results = useBrave
-            ? await searchWithBrave(query)
-            : await searchWithDuckDuckGo(query);
+        const provider = config.webSearch.provider;
+        const useBrave = provider === 'brave' && config.webSearch.braveApiKey;
+        const useTavily = provider === 'tavily' && config.webSearch.tavilyApiKey;
+        let results = [];
+        let usedProvider = provider;
 
-        if (!useBrave && !results.length) {
-            results = await searchWithDuckDuckGoHtml(query);
+        if (useBrave) {
+            results = await searchWithBrave(query);
+        } else if (useTavily) {
+            results = await searchTavily(query);
+        } else {
+            usedProvider = 'wikipedia';
+            results = await searchWikipedia(query);
+            if (!results.length) {
+                results = await searchWithDuckDuckGo(query);
+                if (results.length) usedProvider = 'duckduckgo';
+            }
         }
 
         return {
             enabled: true,
-            provider: useBrave ? 'brave' : 'duckduckgo',
+            provider: usedProvider,
             results,
         };
     } catch (error) {
@@ -419,6 +419,125 @@ async function performWebSearch(query) {
 function getMediaExtension(mimetype = '') {
     const subtype = mimetype.split('/')[1] || 'bin';
     return subtype.split(';')[0].replace(/[^a-z0-9.+-]/gi, '') || 'bin';
+}
+
+function isDocumentMedia(mimetype = '', messageType = '') {
+    return messageType === 'document' || [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain',
+        'application/rtf',
+        'application/vnd.oasis.opendocument.text',
+        'text/csv',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ].includes(mimetype);
+}
+
+async function parseDocument(media) {
+    if (!config.media.documentEnabled) {
+        return { ok: false, note: 'Lecture de documents desactivee.' };
+    }
+
+    if (!media?.data) {
+        return { ok: false, note: 'Document vide ou inaccessible.' };
+    }
+
+    const buffer = Buffer.from(media.data, 'base64');
+    if (buffer.length > config.media.maxBytes) {
+        return { ok: false, note: `Document trop volumineux (${buffer.length} octets).` };
+    }
+
+    const mimetype = media.mimetype || '';
+    const filename = (media.filename || '').toLowerCase();
+
+    try {
+        if (mimetype === 'application/pdf' || filename.endsWith('.pdf')) {
+            const pdfParse = require('pdf-parse');
+            const data = await pdfParse(buffer);
+            const text = data.text || '';
+            return { ok: true, text: sanitizeMessage(text.substring(0, 8000)), pages: data.numpages };
+        }
+
+        if (mimetype.includes('wordprocessingml') || mimetype.includes('msword') || filename.endsWith('.docx')) {
+            const mammoth = require('mammoth');
+            const result = await mammoth.extractRawText({ buffer });
+            return { ok: true, text: sanitizeMessage(result.value.substring(0, 8000)) };
+        }
+
+        // Plain text, CSV, RTF et autres textes
+        const text = buffer.toString('utf-8');
+        return { ok: true, text: sanitizeMessage(text.substring(0, 8000)) };
+    } catch (error) {
+        logger.error('Erreur lecture document', { error: error.message, mimetype, filename });
+        return { ok: false, note: `Impossible de lire le document: ${error.message}` };
+    }
+}
+
+async function generateVoice(text) {
+    if (!config.tts.enabled) {
+        return { ok: false, note: 'Synthese vocale desactivee.' };
+    }
+
+    const speakText = text.substring(0, config.tts.maxChars);
+    if (!speakText.trim()) {
+        return { ok: false, note: 'Texte vide pour la synthese vocale.' };
+    }
+
+    try {
+        if (config.tts.provider === 'gtts' || !config.tts.elevenLabsApiKey) {
+            const gTTS = require('gtts');
+            const speech = new gTTS(speakText, config.tts.voice);
+            const audioBuffer = await new Promise((resolve, reject) => {
+                speech.save('/tmp/tts_output.mp3', (err, result) => {
+                    if (err) reject(err);
+                    else {
+                        const fs = require('fs');
+                        const buf = fs.readFileSync('/tmp/tts_output.mp3');
+                        resolve(buf);
+                    }
+                });
+            });
+            return {
+                ok: true,
+                data: audioBuffer.toString('base64'),
+                mimetype: 'audio/mpeg',
+                filename: 'reponse_vocale.mp3',
+            };
+        }
+
+        if (config.tts.provider === 'elevenlabs' && config.tts.elevenLabsApiKey) {
+            const response = await axios.post(
+                `https://api.elevenlabs.io/v1/text-to-speech/${config.tts.elevenLabsVoice}`,
+                {
+                    text: speakText,
+                    model_id: 'eleven_multilingual_v2',
+                    voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+                },
+                {
+                    headers: {
+                        'Accept': 'audio/mpeg',
+                        'Content-Type': 'application/json',
+                        'xi-api-key': config.tts.elevenLabsApiKey,
+                    },
+                    responseType: 'arraybuffer',
+                    timeout: 30000,
+                }
+            );
+            return {
+                ok: true,
+                data: Buffer.from(response.data).toString('base64'),
+                mimetype: 'audio/mpeg',
+                filename: 'reponse_vocale.mp3',
+            };
+        }
+
+        return { ok: false, note: 'Aucun fournisseur TTS configure.' };
+    } catch (error) {
+        logger.error('Erreur generation vocale', { error: error.message, provider: config.tts.provider });
+        return { ok: false, note: `Synthese vocale indisponible: ${error.message}` };
+    }
 }
 
 function isAudioMedia(mimetype = '', messageType = '') {
@@ -464,7 +583,8 @@ async function transcribeAudioMedia(media, messageType = '') {
                     'Authorization': `Bearer ${config.groq.apiKey}`,
                 },
                 timeout: config.groq.timeout,
-                maxBodyLength: Infinity,
+                maxBodyLength: config.media.maxBytes + 4096,
+                maxContentLength: config.media.maxBytes + 4096,
             }
         );
 
@@ -533,7 +653,8 @@ async function analyzeImageMedia(media, prompt = '') {
                     'Content-Type': 'application/json',
                 },
                 timeout: config.groq.timeout,
-                maxBodyLength: Infinity,
+                maxBodyLength: config.media.maxBytes + 4096,
+                maxContentLength: config.media.maxBytes + 4096,
             }
         );
 
@@ -586,9 +707,27 @@ async function analyzeMedia(media, messageType = '', caption = '') {
         };
     }
 
+    if (isDocumentMedia(media.mimetype || '', messageType)) {
+        const parsed = await parseDocument(media);
+        if (parsed.ok && parsed.text) {
+            const docInfo = parsed.pages ? ` (${parsed.pages} pages)` : '';
+            return {
+                summary: `Document lu${docInfo}: "${parsed.text.substring(0, 300)}..."`,
+                textForConversation: caption
+                    ? `${caption}\n\nContenu du document: ${parsed.text}`
+                    : `Contenu du document: ${parsed.text}`,
+            };
+        }
+        return {
+            summary: parsed.note || 'Document recu, lecture impossible.',
+            textForConversation: caption || '[document recu]',
+        };
+    }
+
+    // Autres types (video, sticker, etc.)
     return {
-        summary: 'Media recu. Analyse automatique disponible seulement pour vocaux/audio et images.',
-        textForConversation: caption || '[media recu]',
+        summary: `Media recu (${messageType || mimetype}).`,
+        textForConversation: caption || `[${messageType || 'media'} recu]`,
     };
 }
 
@@ -715,11 +854,118 @@ ${historyText || 'Première réponse'}
 }
 
 /**
+ * Rattrapage : répond aux conversations en attente quand le bot devient actif.
+ */
+async function catchUpPendingConversations(client, ownerPhone) {
+    const conversations = await db.getConversationsNeedingReply(ownerPhone, 5, 12);
+    if (!conversations.length) {
+        logger.info('✅ Aucune conversation en attente de rattrapage');
+        return;
+    }
+
+    logger.info(`🔄 Rattrapage: ${conversations.length} conversation(s) en attente`);
+
+    for (const conv of conversations) {
+        try {
+            const phone = conv.phone;
+            const history = conv.history;
+            const lastMsg = history[history.length - 1];
+            const senderName = lastMsg?.phone === phone
+                ? await db.getContactMemory(phone).then(m => m?.name || 'ami').catch(() => 'ami')
+                : 'ami';
+
+            const contactMemory = await db.getContactMemory(phone);
+            const webSearch = null;
+
+            const contextHistory = history.map(h =>
+                `${h.role === 'user' ? senderName : config.bot.name}: ${h.content}`
+            ).join('\n');
+
+            const prompt = `Tu es ${config.bot.name}, assistant IA de ${config.user.name}.
+
+CONTEXTE: ${config.user.name} etait absent et tu reponds maintenant a ses messages en retard.
+
+HISTORIQUE DE LA CONVERSATION:
+${contextHistory}
+
+🧠 MEMOIRE SUR ${senderName}:
+${formatContactMemory(contactMemory)}
+
+INSTRUCTIONS:
+1. Presente-toi comme l'assistant de ${config.user.name}
+2. Excuse-toi du delai (${config.user.name} etait absent)
+3. Reponds au message de ${senderName} de facon naturelle et utile
+4. Sois concis (2-3 phrases max)
+5. Si c'est urgent, dis que tu transmets`;
+
+            const response = await callGroqAPI([{ role: 'user', content: prompt }]);
+            const cleanResponse = sanitizeMessage(response);
+
+            await client.sendMessage(`${phone}@c.us`, cleanResponse);
+            await db.saveMessage(phone, 'assistant', cleanResponse);
+            await db.addToInterventionQueue(
+                phone, senderName,
+                history.map(h => h.content).join(' | '),
+                'Rattrapage automatique - reponse envoyee'
+            );
+
+            logger.info(`✅ Rattrapage: reponse envoyee a ${senderName} (${phone})`);
+        } catch (error) {
+            logger.error('Erreur rattrapage conversation', { phone: conv.phone, error: error.message });
+        }
+    }
+
+    logger.info(`🏁 Rattrapage termine: ${conversations.length} reponse(s) envoyee(s)`);
+}
+
+/**
  * Génère une réponse IA pour le propriétaire
  */
 async function generateOwnerResponse(userMessage) {
+    // Recherche web si necessaire
+    const webSearch = needsWebSearch(userMessage) ? await performWebSearch(userMessage) : null;
+    const webContext = webSearch ? formatWebSearchContext(webSearch) : '';
+
+    // Verifier les derniers emails si demande
+    let emailHistory = '';
+    if (/email|mail|courriel|bo[iî]te/i.test(userMessage)) {
+        try {
+            const logs = await db.getEmailLogs(5);
+            if (logs.length) {
+                emailHistory = '\nDerniers emails:\n' + logs.map(e =>
+                    `- [${e.status}] ${e.subject || '(sans sujet)'} → ${e.recipient || e.sender} (${e.created_at})`
+                ).join('\n');
+            } else {
+                emailHistory = '\nAucun email dans l historique.';
+            }
+        } catch (_) {}
+    }
+
+    const capabilities = [];
+    capabilities.push('- Envoyer des emails: dis "!email destinataire | sujet | corps"');
+    if (config.webSearch.enabled) capabilities.push('- Chercher sur le web: pose une question sur une actualite, meteo, etc.');
+    capabilities.push('- Lire des documents PDF, Word, TXT et analyser des images');
+    capabilities.push('- Consulter tes derniers emails');
+
+    const systemContext = `Tu es ${config.bot.name}, l'assistant IA personnel de ${config.user.name}.
+
+CAPACITÉS:
+${capabilities.join('\n')}
+
+RÈGLES:
+- Réponds de façon naturelle, concise et utile en français.
+- Tu peux l'appeler par son prénom (${config.user.name}).
+- Tu es son assistant, pas un bot d'absence.
+- Si tu cherches sur le web, mentionne la source.
+- Pour envoyer un email, rappelle la commande !email.
+${webContext ? '\nRÉSULTATS DE RECHERCHE WEB:\n' + webContext : ''}
+${emailHistory}`;
+
     try {
-        const response = await callGroqAPI([{ role: 'user', content: userMessage }]);
+        const response = await callGroqAPI([
+            { role: 'system', content: systemContext },
+            { role: 'user', content: userMessage },
+        ]);
         return sanitizeMessage(response);
     } catch (error) {
         logger.error('Erreur generateOwnerResponse', { error: error.message });
@@ -742,9 +988,16 @@ module.exports = {
     analyzeMedia,
     transcribeAudioMedia,
     analyzeImageMedia,
+    parseDocument,
+    generateVoice,
+    isDocumentMedia,
+    isAudioMedia,
+    isImageMedia,
+    getMediaExtension,
     formatOwnerProfile,
     formatContactMemory,
     getEmergencyInstructions,
     generateAbsenceResponse,
     generateOwnerResponse,
+    catchUpPendingConversations,
 };

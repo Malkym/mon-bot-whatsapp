@@ -80,6 +80,29 @@ async function createTables() {
             size INTEGER,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )`,
+
+        `CREATE TABLE IF NOT EXISTS intervention_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone TEXT NOT NULL,
+            sender_name TEXT,
+            message TEXT NOT NULL,
+            reason TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE TABLE IF NOT EXISTS email_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            direction TEXT NOT NULL,
+            recipient TEXT,
+            sender TEXT,
+            subject TEXT,
+            body TEXT,
+            status TEXT DEFAULT 'sent',
+            message_id TEXT,
+            error TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
     ];
 
     // Créer les tables
@@ -93,6 +116,8 @@ async function createTables() {
         `CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)`,
         `CREATE INDEX IF NOT EXISTS idx_api_logs_timestamp ON api_logs(timestamp)`,
         `CREATE INDEX IF NOT EXISTS idx_media_phone_timestamp ON media_messages(phone, timestamp)`,
+        `CREATE INDEX IF NOT EXISTS idx_intervention_status ON intervention_queue(status)`,
+        `CREATE INDEX IF NOT EXISTS idx_email_created ON email_logs(created_at)`,
     ];
 
     for (const query of indexQueries) {
@@ -110,8 +135,13 @@ async function createTables() {
 /**
  * Exécute une requête sans retour
  */
+function checkDb() {
+    if (!db) throw new Error('Database not initialized');
+}
+
 function run(sql, params = []) {
     return new Promise((resolve, reject) => {
+        checkDb();
         db.run(sql, params, function (err) {
             if (err) {
                 logger.error('Erreur DB run', { sql: sql.substring(0, 50), error: err.message });
@@ -128,6 +158,7 @@ function run(sql, params = []) {
  */
 function get(sql, params = []) {
     return new Promise((resolve, reject) => {
+        checkDb();
         db.get(sql, params, (err, row) => {
             if (err) {
                 logger.error('Erreur DB get', { sql: sql.substring(0, 50), error: err.message });
@@ -144,6 +175,7 @@ function get(sql, params = []) {
  */
 function all(sql, params = []) {
     return new Promise((resolve, reject) => {
+        checkDb();
         db.all(sql, params, (err, rows) => {
             if (err) {
                 logger.error('Erreur DB all', { sql: sql.substring(0, 50), error: err.message });
@@ -297,6 +329,22 @@ async function getContactMemory(phone) {
     }
 }
 
+async function getMessageActivity(days = 7) {
+    try {
+        return await all(
+            `SELECT DATE(timestamp) AS day, COUNT(*) AS count
+             FROM messages
+             WHERE timestamp >= datetime('now', ?)
+             GROUP BY DATE(timestamp)
+             ORDER BY day ASC`,
+            [`-${days} days`]
+        );
+    } catch (err) {
+        logger.error('Erreur getMessageActivity', { error: err.message });
+        return [];
+    }
+}
+
 async function getRecentMessages(limit = 50) {
     try {
         return await all(
@@ -308,6 +356,41 @@ async function getRecentMessages(limit = 50) {
         );
     } catch (err) {
         logger.error('Erreur getRecentMessages', { error: err.message });
+        return [];
+    }
+}
+
+/**
+ * Trouve les conversations où le dernier message est d'un contact (pas du bot, pas du proprio).
+ * Utilisé pour le rattrapage quand le bot devient actif.
+ */
+async function getConversationsNeedingReply(ownerPhone, limit = 5, maxHours = 12) {
+    try {
+        const rows = await all(
+            `SELECT phone, MAX(timestamp) AS last_msg_at
+             FROM messages
+             WHERE role = 'user'
+               AND phone != ?
+               AND timestamp > datetime('now', '-' || ? || ' hours')
+             GROUP BY phone
+             HAVING last_msg_at = (
+                 SELECT MAX(timestamp) FROM messages m2
+                 WHERE m2.phone = messages.phone
+             )
+             ORDER BY last_msg_at ASC
+             LIMIT ?`,
+            [ownerPhone, maxHours, limit]
+        );
+        const result = [];
+        for (const row of rows) {
+            const history = await getConversationHistory(row.phone, 10);
+            if (history.length > 0) {
+                result.push({ phone: row.phone, lastMsgAt: row.last_msg_at, history });
+            }
+        }
+        return result;
+    } catch (err) {
+        logger.error('Erreur getConversationsNeedingReply', { error: err.message });
         return [];
     }
 }
@@ -437,19 +520,114 @@ async function close() {
     });
 }
 
+// ========== INTERVENTION QUEUE ==========
+
+async function addToInterventionQueue(phone, senderName, message, reason) {
+    try {
+        await run(
+            `INSERT INTO intervention_queue (phone, sender_name, message, reason)
+             VALUES (?, ?, ?, ?)`,
+            [phone, senderName, message, reason]
+        );
+    } catch (err) {
+        logger.error('Erreur addToInterventionQueue', { error: err.message });
+    }
+}
+
+async function getInterventionQueue(limit = 30) {
+    try {
+        return await all(
+            `SELECT * FROM intervention_queue
+             ORDER BY created_at DESC
+             LIMIT ?`,
+            [limit]
+        );
+    } catch (err) {
+        logger.error('Erreur getInterventionQueue', { error: err.message });
+        return [];
+    }
+}
+
+async function markInterventionDone(id) {
+    try {
+        await run(
+            `UPDATE intervention_queue SET status = 'done' WHERE id = ?`,
+            [id]
+        );
+    } catch (err) {
+        logger.error('Erreur markInterventionDone', { error: err.message });
+    }
+}
+
+// ========== EMAIL LOGS ==========
+
+async function logEmail(direction, recipient, subject, body, status, messageId, error) {
+    try {
+        await run(
+            `INSERT INTO email_logs (direction, recipient, sender, subject, body, status, message_id, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [direction, recipient, config.email.from || config.email.user || '', subject, body, status, messageId || null, error || null]
+        );
+    } catch (err) {
+        logger.error('Erreur logEmail', { error: err.message });
+    }
+}
+
+async function getEmailLogs(limit = 30) {
+    try {
+        return await all(
+            `SELECT * FROM email_logs
+             ORDER BY created_at DESC
+             LIMIT ?`,
+            [limit]
+        );
+    } catch (err) {
+        logger.error('Erreur getEmailLogs', { error: err.message });
+        return [];
+    }
+}
+
+async function getDashboardFullStats() {
+    try {
+        const msgStats = await getDashboardStats();
+        const pendingCount = await get(
+            `SELECT COUNT(*) AS count FROM intervention_queue WHERE status = 'pending'`
+        );
+        const emailCount = await get(
+            `SELECT COUNT(*) AS count FROM email_logs`
+        );
+        return {
+            ...msgStats,
+            pendingInterventions: pendingCount?.count || 0,
+            totalEmails: emailCount?.count || 0,
+        };
+    } catch (err) {
+        logger.error('Erreur getDashboardFullStats', { error: err.message });
+        return {};
+    }
+}
+
 module.exports = {
     initialize,
     saveMessage,
     saveMediaMessage,
     getConversationHistory,
+    getConversationsNeedingReply,
     getContactMemory,
     updateContactMemory,
     getRecentMessages,
+    getMessageActivity,
     getDashboardStats,
     getContactsOverview,
     saveUserProfile,
     getUserProfile,
     logApiCall,
+    addToInterventionQueue,
+    getInterventionQueue,
+    markInterventionDone,
+    logEmail,
+    getEmailLogs,
+    getDashboardFullStats,
     close,
     run,
     get,

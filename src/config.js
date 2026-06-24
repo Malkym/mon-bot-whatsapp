@@ -4,22 +4,41 @@
  */
 
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const DASHBOARD_TOKEN_FILE = path.join(__dirname, '..', '.dashboard_token');
+
+function loadDashboardToken() {
+    if (process.env.DASHBOARD_TOKEN) return process.env.DASHBOARD_TOKEN;
+    try {
+        if (fs.existsSync(DASHBOARD_TOKEN_FILE)) {
+            return fs.readFileSync(DASHBOARD_TOKEN_FILE, 'utf-8').trim();
+        }
+    } catch (_) {}
+    const token = crypto.randomBytes(32).toString('hex');
+    try {
+        fs.writeFileSync(DASHBOARD_TOKEN_FILE, token, 'utf-8');
+    } catch (_) {}
+    return token;
+}
 
 const config = {
     // API Groq
     groq: {
         apiKey: process.env.GROQ_API_KEY,
         model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
-        maxTokens: parseInt(process.env.GROQ_MAX_TOKENS) || 600,
-        temperature: parseFloat(process.env.GROQ_TEMPERATURE) || 0.8,
-        timeout: parseInt(process.env.GROQ_TIMEOUT) || 30000,
+        maxTokens: parseInt(process.env.GROQ_MAX_TOKENS, 10) ?? 600,
+        temperature: parseFloat(process.env.GROQ_TEMPERATURE) ?? 0.8,
+        timeout: parseInt(process.env.GROQ_TIMEOUT, 10) ?? 60000,
     },
 
     // Informations personnelles
     user: {
         name: process.env.MY_NAME || 'Malkym',
-        phone: process.env.MY_PHONE || '23675835276',
-        urgentPhone: process.env.URGENT_PHONE || process.env.MY_ALT_PHONE || process.env.MY_PHONE || '23675835276',
+        phone: process.env.MY_PHONE,
+        urgentPhone: process.env.URGENT_PHONE || process.env.MY_ALT_PHONE || process.env.MY_PHONE,
         country: process.env.MY_COUNTRY || 'Centrafrique',
         city: process.env.MY_CITY || 'Bangui',
         timezone: process.env.MY_TIMEZONE || 'Africa/Bangui',
@@ -47,26 +66,48 @@ const config = {
     // Rate Limiting
     rateLimit: {
         enabled: process.env.RATE_LIMIT_ENABLED !== 'false',
-        perUser: parseInt(process.env.RATE_LIMIT_PER_USER) || 10,
-        window: parseInt(process.env.RATE_LIMIT_WINDOW) || 3600000, // 1 heure
+        perUser: parseInt(process.env.RATE_LIMIT_PER_USER, 10) ?? 10,
+        window: parseInt(process.env.RATE_LIMIT_WINDOW, 10) ?? 3600000, // 1 heure
     },
 
     // Recherche web optionnelle
     webSearch: {
         enabled: process.env.WEB_SEARCH_ENABLED === 'true',
-        provider: process.env.WEB_SEARCH_PROVIDER || 'duckduckgo',
+        provider: process.env.WEB_SEARCH_PROVIDER || 'wikipedia',
         mode: process.env.WEB_SEARCH_MODE || 'auto',
         braveApiKey: process.env.BRAVE_SEARCH_API_KEY,
-        maxResults: parseInt(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
+        tavilyApiKey: process.env.TAVILY_API_KEY,
+        maxResults: parseInt(process.env.WEB_SEARCH_MAX_RESULTS, 10) ?? 3,
     },
 
     // Lecture/analyse des medias WhatsApp
     media: {
         transcriptionEnabled: process.env.MEDIA_TRANSCRIPTION_ENABLED !== 'false',
         visionEnabled: process.env.MEDIA_VISION_ENABLED !== 'false',
+        documentEnabled: process.env.MEDIA_DOCUMENT_ENABLED !== 'false',
         transcriptionModel: process.env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3-turbo',
         visionModel: process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct',
-        maxBytes: parseInt(process.env.MEDIA_MAX_BYTES) || 20 * 1024 * 1024,
+        maxBytes: parseInt(process.env.MEDIA_MAX_BYTES, 10) ?? 20 * 1024 * 1024,
+    },
+
+    // Text-to-Speech (voix)
+    tts: {
+        enabled: process.env.TTS_ENABLED === 'true',
+        provider: process.env.TTS_PROVIDER || 'gtts',
+        voice: process.env.TTS_VOICE || 'fr',
+        elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
+        elevenLabsVoice: process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM',
+        autoReply: process.env.TTS_AUTO_REPLY === 'true',
+        maxChars: parseInt(process.env.TTS_MAX_CHARS, 10) ?? 500,
+    },
+
+    // Email
+    email: {
+        host: process.env.EMAIL_HOST,
+        port: parseInt(process.env.EMAIL_PORT, 10) ?? 587,
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+        from: process.env.EMAIL_FROM,
     },
 
     // Dashboard local
@@ -74,7 +115,7 @@ const config = {
         enabled: process.env.DASHBOARD_ENABLED !== 'false',
         host: process.env.DASHBOARD_HOST || '127.0.0.1',
         port: parseInt(process.env.DASHBOARD_PORT) || 3050,
-        token: process.env.DASHBOARD_TOKEN || '',
+        token: loadDashboardToken(),
     },
 
     // Environment
@@ -91,7 +132,9 @@ function validateConfig() {
         errors.push('❌ GROQ_API_KEY manquante - configuration impossible');
     }
 
-    if (!config.user.phone || !/^\d+$/.test(config.user.phone)) {
+    if (!config.user.phone) {
+        errors.push('❌ MY_PHONE manquant - ajoute-le dans .env');
+    } else if (!/^\d+$/.test(config.user.phone)) {
         errors.push('❌ MY_PHONE invalide - doit être un numéro');
     }
 

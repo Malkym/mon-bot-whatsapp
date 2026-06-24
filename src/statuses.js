@@ -37,6 +37,12 @@ function getCurrentStatus() {
                 message: `${config.user.name} profite du dimanche en famille. Il répondra plus tard.`,
             };
         }
+        // Dimanche hors horaires église/famille
+        return {
+            status: 'rest',
+            label: '🌅 Repos dominical',
+            message: `${config.user.name} est en repos. Il répondra dès que possible.`,
+        };
     }
 
     // LUNDI-SAMEDI
